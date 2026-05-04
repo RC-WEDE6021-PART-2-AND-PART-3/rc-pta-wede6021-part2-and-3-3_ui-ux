@@ -24,9 +24,9 @@ The application responds directly to the dual market opportunity identified in t
 
 | Name | Student Number | Role |
 |------|---------------|------|
-| Zandile Selao| ST10451437 | Lead Developer & Project Lead |
-| Muhluri Nkuna | ST10436981 | Frontend & UI Design |
-| Tshiamo Mosetlha | ST10437226 | Backend & Database Design |
+| Tshiamo Mosetlha | ST10451437 | Lead Developer & Project Lead |
+| Zandile Selao | ST10436981 | Frontend & UI Design |
+| Muhluri Nkuna| ST10437226 | Backend & Database Design |
 
 **Institution:** The Independent Institute of Education (IIE) — Rosebank College  
 **Module:** WEDE6021 — Web Development  
