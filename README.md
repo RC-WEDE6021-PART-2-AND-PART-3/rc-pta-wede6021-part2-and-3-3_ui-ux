@@ -9,6 +9,8 @@
 ---
 LINK FOR VIDEO IN YOUTUBE: https://youtu.be/GBPLnNt7iQk?si=HBfFrbP-mKReccA4
 
+LINK FOR VIDEO CREATED USING MICROSOFT CLIPCHAMP: https://1drv.ms/v/c/f677d3b3cec2eae4/IQBiLrbLt9ZvQqjyAsJNNUdeARH2np0oK4SggyAUQSrvNgA?e=DqXbRO
+
 ## 📋 Project Overview
 
 **Pastimes** is a fully functional, peer-to-peer (P2P) second-hand branded clothing e-commerce web application built for the **WEDE6021 Portfolio of Evidence (POE)** at **The IIE Rosebank College**.
