@@ -1,0 +1,5 @@
+1,1,1,2500.00,2026-01-15,Delivered,EFT
+2,2,2,850.00,2026-01-18,Shipped,Credit Card
+3,3,3,4200.00,2026-01-20,Processing,EFT
+4,4,4,450.00,2026-01-22,Pending,Credit Card
+5,5,5,3800.00,2026-01-25,Delivered,EFT
