@@ -1,305 +1,235 @@
 <?php
-/**
- * ============================================================
- * PASTIMES — Online Second-Hand Clothing Store
- * File: browse.php
- * Description: Browse collection page with filters
- * ============================================================
- */
-
-session_start();
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 require_once 'includes/DBConn.php';
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-// Get filter parameters
-$category = isset($_GET['category']) ? trim($_GET['category']) : '';
-$brand = isset($_GET['brand']) ? trim($_GET['brand']) : '';
-$size = isset($_GET['size']) ? trim($_GET['size']) : '';
-$condition = isset($_GET['condition']) ? trim($_GET['condition']) : '';
-$minPrice = isset($_GET['minPrice']) && is_numeric($_GET['minPrice']) ? $_GET['minPrice'] : '';
-$maxPrice = isset($_GET['maxPrice']) && is_numeric($_GET['maxPrice']) ? $_GET['maxPrice'] : '';
-$search = isset($_GET['search']) ? trim($_GET['search']) : '';
-$sort = isset($_GET['sort']) ? $_GET['sort'] : 'newest';
+$conn = getConnection();
 
-// Build query
-$where = ["status = 'available'"];
-$params = [];
-$types = '';
+$category  = $_GET['category']  ?? '';
+$brand     = $_GET['brand']     ?? '';
+$size      = $_GET['size']      ?? '';
+$condition = $_GET['condition'] ?? '';
+$minPrice  = $_GET['minPrice']  ?? '';
+$maxPrice  = $_GET['maxPrice']  ?? '';
+$search    = $_GET['search']    ?? '';
 
-if (!empty($category)) {
-    $where[] = "category = ?";
-    $params[] = $category;
-    $types .= 's';
+$where = ["c.status = 'available'"];
+$params = []; $types = '';
+
+if ($category)  { $where[] = "c.category = ?";         $params[] = $category;  $types .= 's'; }
+if ($brand)     { $where[] = "c.brand LIKE ?";          $params[] = "%$brand%"; $types .= 's'; }
+if ($size)      { $where[] = "c.size = ?";              $params[] = $size;      $types .= 's'; }
+if ($condition) { $where[] = "c.clothingCondition = ?"; $params[] = $condition; $types .= 's'; }
+if ($minPrice)  { $where[] = "c.price >= ?";            $params[] = $minPrice;  $types .= 'd'; }
+if ($maxPrice)  { $where[] = "c.price <= ?";            $params[] = $maxPrice;  $types .= 'd'; }
+if ($search)    { $where[] = "(c.brand LIKE ? OR c.description LIKE ?)"; $params[] = "%$search%"; $params[] = "%$search%"; $types .= 'ss'; }
+
+$sql = "SELECT c.*, u.fullName AS sellerName FROM tblClothing c
+        JOIN tblUser u ON c.sellerID = u.userID
+        WHERE " . implode(' AND ', $where) . " ORDER BY c.dateAdded DESC";
+
+$items = [];
+if ($types) {
+    $stmt = $conn->prepare($sql);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+} else {
+    $result = $conn->query($sql);
 }
-
-if (!empty($brand)) {
-    $where[] = "brand LIKE ?";
-    $params[] = "%$brand%";
-    $types .= 's';
-}
-
-if (!empty($size)) {
-    $where[] = "size = ?";
-    $params[] = $size;
-    $types .= 's';
-}
-
-if (!empty($condition)) {
-    $where[] = "clothingCondition = ?";
-    $params[] = $condition;
-    $types .= 's';
-}
-
-if (!empty($minPrice)) {
-    $where[] = "price >= ?";
-    $params[] = $minPrice;
-    $types .= 's';
-}
-
-if (!empty($maxPrice)) {
-    $where[] = "price <= ?";
-    $params[] = $maxPrice;
-    $types .= 's';
-}
-
-if (!empty($search)) {
-    $where[] = "(brand LIKE ? OR description LIKE ? OR category LIKE ?)";
-    $searchTerm = "%$search%";
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $params[] = $searchTerm;
-    $types .= 'sss';
-}
-
-// Order by
-$orderBy = "dateAdded DESC"; // Default: newest
-switch ($sort) {
-    case 'oldest':
-        $orderBy = "dateAdded ASC";
-        break;
-    case 'price_low':
-        $orderBy = "price ASC";
-        break;
-    case 'price_high':
-        $orderBy = "price DESC";
-        break;
-    case 'brand':
-        $orderBy = "brand ASC";
-        break;
-}
-
-$sql = "SELECT c.*, u.username as sellerName FROM tblClothing c 
-        LEFT JOIN tblUser u ON c.sellerID = u.userID 
-        WHERE " . implode(' AND ', $where) . " 
-        ORDER BY " . $orderBy;
-
-try {
-    $conn = getConnection();
-    
-    // Get total count
-    $countSql = "SELECT COUNT(*) as total FROM tblClothing WHERE " . implode(' AND ', $where);
-    if (!empty($params)) {
-        $countStmt = $conn->prepare($countSql);
-        $countStmt->bind_param($types, ...$params);
-        $countStmt->execute();
-        $totalItems = $countStmt->get_result()->fetch_assoc()['total'];
-    } else {
-        $totalItems = $conn->query($countSql)->fetch_assoc()['total'];
-    }
-    
-    // Get items
-    if (!empty($params)) {
-        $stmt = $conn->prepare($sql);
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $items = $stmt->get_result();
-    } else {
-        $items = $conn->query($sql);
-    }
-    
-    // Get unique brands for filter
-    $brandsResult = $conn->query("SELECT DISTINCT brand FROM tblClothing WHERE status = 'available' ORDER BY brand");
-    $brands = [];
-    while ($row = $brandsResult->fetch_assoc()) {
-        $brands[] = $row['brand'];
-    }
-    
-} catch (Exception $e) {
-    $items = null;
-    $totalItems = 0;
-    $brands = [];
-}
+while ($r = $result->fetch_assoc()) $items[] = $r;
+$conn->close();
+include 'includes/header.php';
 ?>
-<?php include 'includes/header.php'; ?>
 
-        <!-- Page Header -->
-        <div class="page-header">
-            <h1>Browse <span>Collection</span></h1>
-            <p>Explore our curated selection of premium second-hand branded clothing. Use filters to find exactly what you're looking for.</p>
+<!-- Lightbox -->
+<div id="lightbox" onclick="closeLightbox()" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.93);align-items:center;justify-content:center;flex-direction:column;gap:1rem;">
+    <button onclick="closeLightbox()" style="position:absolute;top:20px;right:30px;background:none;border:none;color:var(--gold);font-size:2.5rem;cursor:pointer;z-index:10000;">&times;</button>
+    <img id="lightboxImg" src="" alt="" style="max-width:88vw;max-height:82vh;border-radius:12px;border:2px solid var(--gold);box-shadow:0 0 60px rgba(201,168,76,.3);">
+    <p id="lightboxCaption" style="color:var(--gold);font-family:var(--font-display);font-size:1.1rem;letter-spacing:.08em;"></p>
+</div>
+
+<div class="page-header">
+    <h1>Browse <span style="color:var(--gold)">Collection</span></h1>
+    <p>Discover premium second-hand fashion from verified sellers</p>
+</div>
+
+<div class="container section">
+
+    <form method="GET" action="browse.php" style="margin-bottom:var(--space-xl);">
+        <div style="display:flex;gap:var(--space-sm);">
+            <input type="text" name="search" class="form-control" placeholder="Search by brand or description..." value="<?php echo htmlspecialchars($search); ?>">
+            <button type="submit" class="btn btn-primary"><i class="fas fa-search"></i> Search</button>
+            <?php if ($search||$category||$brand||$size||$condition): ?>
+            <a href="browse.php" class="btn btn-ghost">Clear</a>
+            <?php endif; ?>
         </div>
+    </form>
 
-        <!-- Browse Section -->
-        <section class="section">
-            <div class="container">
-                <div class="browse-layout">
-                    
-                    <!-- Filter Panel -->
-                    <aside class="filter-panel">
-                        <div class="filter-header">
-                            <h3><i class="fas fa-sliders-h"></i> Filters</h3>
-                            <a href="browse.php" class="filter-clear">Clear All</a>
-                        </div>
+    <div class="browse-layout">
 
-                        <form method="GET" action="browse.php" id="filterForm">
-                            <!-- Category Filter -->
-                            <div class="filter-section">
-                                <div class="filter-label">Category</div>
-                                <div class="radio-option">
-                                    <input type="radio" name="category" value="" <?php echo empty($category) ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>All</label>
-                                </div>
-                                <div class="radio-option">
-                                    <input type="radio" name="category" value="Women" <?php echo $category === 'Women' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Women</label>
-                                </div>
-                                <div class="radio-option">
-                                    <input type="radio" name="category" value="Men" <?php echo $category === 'Men' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Men</label>
-                                </div>
-                                <div class="radio-option">
-                                    <input type="radio" name="category" value="Accessories" <?php echo $category === 'Accessories' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Accessories</label>
-                                </div>
-                                <div class="radio-option">
-                                    <input type="radio" name="category" value="Footwear" <?php echo $category === 'Footwear' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Footwear</label>
-                                </div>
-                            </div>
+        <aside class="filter-panel">
+            <div class="filter-header">
+                <h3><i class="fas fa-filter"></i> Filters</h3>
+                <a href="browse.php" class="filter-clear">Clear all</a>
+            </div>
+            <form method="GET" action="browse.php" id="filterForm">
+                <?php if ($search): ?><input type="hidden" name="search" value="<?php echo htmlspecialchars($search); ?>"><?php endif; ?>
+                <div class="filter-section">
+                    <div class="filter-label">Category</div>
+                    <?php foreach (['Men','Women','Footwear','Accessories'] as $cat): ?>
+                    <label class="radio-option">
+                        <input type="radio" name="category" value="<?php echo $cat; ?>" <?php echo $category===$cat?'checked':''; ?> onchange="this.form.submit()">
+                        <?php echo $cat; ?>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+                <div class="filter-section">
+                    <div class="filter-label">Condition</div>
+                    <?php foreach (['Like New','Excellent','Good','Fair'] as $cond): ?>
+                    <label class="radio-option">
+                        <input type="radio" name="condition" value="<?php echo $cond; ?>" <?php echo $condition===$cond?'checked':''; ?> onchange="this.form.submit()">
+                        <?php echo $cond; ?>
+                    </label>
+                    <?php endforeach; ?>
+                </div>
+                <div class="filter-section">
+                    <div class="filter-label">Size</div>
+                    <input type="hidden" name="size" id="sizeInput" value="<?php echo htmlspecialchars($size); ?>">
+                    <div class="size-options">
+                        <?php foreach (['XS','S','M','L','XL','XXL','38','39','40','41','42','43','44','One Size'] as $s): ?>
+                        <button type="button" class="size-btn <?php echo $size===$s?'active':''; ?>" data-size="<?php echo $s; ?>"><?php echo $s; ?></button>
+                        <?php endforeach; ?>
+                    </div>
+                    <button type="submit" class="btn btn-outline btn-sm btn-full" style="margin-top:.5rem;">Apply Size</button>
+                </div>
+                <div class="filter-section">
+                    <div class="filter-label">Price Range (R)</div>
+                    <div style="display:flex;gap:.5rem;align-items:center;">
+                        <input type="number" name="minPrice" class="form-control" placeholder="Min" value="<?php echo htmlspecialchars($minPrice); ?>" style="width:80px;">
+                        <span style="color:var(--text-muted);">-</span>
+                        <input type="number" name="maxPrice" class="form-control" placeholder="Max" value="<?php echo htmlspecialchars($maxPrice); ?>" style="width:80px;">
+                    </div>
+                    <button type="submit" class="btn btn-outline btn-sm btn-full" style="margin-top:.5rem;">Apply Price</button>
+                </div>
+            </form>
+        </aside>
 
-                            <!-- Brand Filter -->
-                            <div class="filter-section">
-                                <div class="filter-label">Brand</div>
-                                <select name="brand" class="form-control" onchange="this.form.submit()">
-                                    <option value="">All Brands</option>
-                                    <?php foreach ($brands as $b): ?>
-                                        <option value="<?php echo htmlspecialchars($b); ?>" <?php echo $brand === $b ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($b); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <!-- Size Filter -->
-                            <div class="filter-section">
-                                <div class="filter-label">Size</div>
-                                <div class="size-options">
-                                    <button type="submit" name="size" value="" class="size-btn <?php echo empty($size) ? 'active' : ''; ?>">All</button>
-                                    <button type="submit" name="size" value="XS" class="size-btn <?php echo $size === 'XS' ? 'active' : ''; ?>">XS</button>
-                                    <button type="submit" name="size" value="S" class="size-btn <?php echo $size === 'S' ? 'active' : ''; ?>">S</button>
-                                    <button type="submit" name="size" value="M" class="size-btn <?php echo $size === 'M' ? 'active' : ''; ?>">M</button>
-                                    <button type="submit" name="size" value="L" class="size-btn <?php echo $size === 'L' ? 'active' : ''; ?>">L</button>
-                                    <button type="submit" name="size" value="XL" class="size-btn <?php echo $size === 'XL' ? 'active' : ''; ?>">XL</button>
-                                </div>
-                            </div>
-
-                            <!-- Condition Filter -->
-                            <div class="filter-section">
-                                <div class="filter-label">Condition</div>
-                                <div class="form-check">
-                                    <input type="checkbox" name="condition" value="" <?php echo empty($condition) ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>All Conditions</label>
-                                </div>
-                                <div class="form-check">
-                                    <input type="checkbox" name="condition" value="Like New" <?php echo $condition === 'Like New' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Like New</label>
-                                </div>
-                                <div class="form-check">
-                                    <input type="checkbox" name="condition" value="Excellent" <?php echo $condition === 'Excellent' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Excellent</label>
-                                </div>
-                                <div class="form-check">
-                                    <input type="checkbox" name="condition" value="Good" <?php echo $condition === 'Good' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Good</label>
-                                </div>
-                                <div class="form-check">
-                                    <input type="checkbox" name="condition" value="Fair" <?php echo $condition === 'Fair' ? 'checked' : ''; ?> onchange="this.form.submit()">
-                                    <label>Fair</label>
-                                </div>
-                            </div>
-
-                            <!-- Price Range Filter -->
-                            <div class="filter-section">
-                                <div class="filter-label">Price Range</div>
-                                <div class="price-range">
-                                    <div class="price-range-inputs">
-                                        <input type="number" name="minPrice" placeholder="Min" value="<?php echo htmlspecialchars($minPrice); ?>">
-                                        <input type="number" name="maxPrice" placeholder="Max" value="<?php echo htmlspecialchars($maxPrice); ?>">
-                                    </div>
-                                    <button type="submit" class="btn btn-sm btn-outline btn-full mt-sm">Apply</button>
-                                </div>
-                            </div>
-                            
-                            <!-- Hidden sort parameter -->
-                            <input type="hidden" name="sort" value="<?php echo htmlspecialchars($sort); ?>">
-                            <input type="hidden" name="search" value="<?php echo htmlspecialchars($search); ?>">
-                        </form>
-                    </aside>
-
-                    <!-- Products Grid -->
-                    <main>
-                        <div class="products-header">
-                            <div class="products-count">
-                                Showing <span><?php echo $totalItems; ?></span> of <span><?php echo $totalItems; ?></span> items
-                            </div>
-                            <div class="flex gap-md">
-                                <span class="text-muted" style="font-size: 0.82rem;">Sort by:</span>
-                                <select class="form-control" style="width: auto; padding: 0.4rem 2rem 0.4rem 0.8rem;" onchange="window.location.href='browse.php?sort='+this.value+'&category=<?php echo urlencode($category); ?>&brand=<?php echo urlencode($brand); ?>&size=<?php echo urlencode($size); ?>&condition=<?php echo urlencode($condition); ?>&search=<?php echo urlencode($search); ?>'">
-                                    <option value="newest" <?php echo $sort === 'newest' ? 'selected' : ''; ?>>Newest First</option>
-                                    <option value="oldest" <?php echo $sort === 'oldest' ? 'selected' : ''; ?>>Oldest First</option>
-                                    <option value="price_low" <?php echo $sort === 'price_low' ? 'selected' : ''; ?>>Price: Low to High</option>
-                                    <option value="price_high" <?php echo $sort === 'price_high' ? 'selected' : ''; ?>>Price: High to Low</option>
-                                    <option value="brand" <?php echo $sort === 'brand' ? 'selected' : ''; ?>>Brand A-Z</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <?php if ($items && $items->num_rows > 0): ?>
-                            <div class="products-grid">
-                                <?php while ($item = $items->fetch_assoc()): ?>
-                                    <a href="product.php?id=<?php echo $item['clothingID']; ?>" class="card card-position-relative">
-                                        <span class="card-badge condition-<?php echo strtolower(str_replace(' ', '-', $item['clothingCondition'])); ?>">
-                                            <?php echo htmlspecialchars($item['clothingCondition']); ?>
-                                        </span>
-                                        <span class="card-badge-category"><?php echo htmlspecialchars($item['category']); ?></span>
-                                        <div class="card-img-placeholder">
-                                            <span style="font-size: 2.5rem; color: var(--gold);">
-                                                <?php echo strtoupper(substr($item['brand'], 0, 1)); ?>
-                                            </span>
-                                        </div>
-                                        <div class="card-body">
-                                            <div class="card-brand"><?php echo htmlspecialchars($item['brand']); ?></div>
-                                            <h3 class="card-title"><?php echo htmlspecialchars(substr($item['description'], 0, 35)); ?>...</h3>
-                                            <p class="card-meta">Size: <?php echo htmlspecialchars($item['size']); ?> | Seller: <?php echo htmlspecialchars($item['sellerName']); ?></p>
-                                            <div class="card-price">R<?php echo number_format($item['price'], 2); ?></div>
-                                        </div>
-                                    </a>
-                                <?php endwhile; ?>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center" style="padding: var(--space-3xl);">
-                                <div style="font-size: 4rem; color: var(--text-faint); margin-bottom: var(--space-lg);">
-                                    <i class="fas fa-search"></i>
-                                </div>
-                                <h3 style="color: var(--text-secondary); margin-bottom: var(--space-sm);">No items found</h3>
-                                <p class="text-muted">Try adjusting your filters or search terms</p>
-                                <a href="browse.php" class="btn btn-outline mt-lg">Clear All Filters</a>
-                            </div>
-                        <?php endif; ?>
-                    </main>
+        <div>
+            <div class="products-header">
+                <div class="products-count">
+                    Showing <span><?php echo count($items); ?></span> item<?php echo count($items)!==1?'s':''; ?>
+                    <?php if ($category): ?> in <strong style="color:var(--gold);"><?php echo htmlspecialchars($category); ?></strong><?php endif; ?>
                 </div>
             </div>
-        </section>
 
-<?php 
-if (isset($conn)) $conn->close();
-include 'includes/footer.php'; 
-?>
+            <?php if ($items): ?>
+            <div class="products-grid">
+                <?php foreach ($items as $item): ?>
+                <div class="card product-card">
+                    <!-- Image -->
+                    <a href="product.php?id=<?php echo $item['clothingID']; ?>" class="card-img-placeholder card-position-relative" style="display:block;">
+                        <img
+                            src="/Pastimes/<?php echo htmlspecialchars($item['imagePath']); ?>"
+                            alt="<?php echo htmlspecialchars($item['brand']); ?>"
+                            onerror="this.src='/Pastimes/images/placeholder.png'"
+                            loading="lazy"
+                            class="product-thumb"
+                            id="img-<?php echo $item['clothingID']; ?>"
+                        >
+                        <span class="card-badge"><?php echo htmlspecialchars($item['clothingCondition']); ?></span>
+                        <span class="card-badge-category"><?php echo htmlspecialchars($item['category']); ?></span>
+                    </a>
+
+                    <!-- Body -->
+                    <div class="card-body">
+                        <div class="card-brand"><?php echo htmlspecialchars($item['brand']); ?></div>
+                        <div class="card-title"><?php echo htmlspecialchars(mb_strimwidth($item['description'],0,55,'…')); ?></div>
+                        <div class="card-meta">Size: <?php echo htmlspecialchars($item['size']); ?> &bull; <?php echo htmlspecialchars($item['sellerName']); ?></div>
+
+                        <!-- Price row with eye toggle -->
+                        <div class="card-price-row">
+                            <div class="card-price">R <?php echo number_format($item['price'],2); ?></div>
+                            <button
+                                class="eye-toggle"
+                                id="eye-<?php echo $item['clothingID']; ?>"
+                                onclick="toggleZoom(<?php echo $item['clothingID']; ?>, '/Pastimes/<?php echo htmlspecialchars($item['imagePath']); ?>', '<?php echo htmlspecialchars(addslashes($item['brand'])); ?>')"
+                                title="Preview image"
+                                aria-label="Toggle image zoom"
+                            >
+                                <i class="fas fa-eye" style="color:var(--gold);" id="eye-icon-<?php echo $item['clothingID']; ?>"></i>
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php else: ?>
+            <div class="empty-state">
+                <div style="font-size:3rem;">🔍</div>
+                <h2>No items found</h2>
+                <p>Try adjusting your filters or search term.</p>
+                <a href="browse.php" class="btn btn-primary">Clear Filters</a>
+            </div>
+            <?php endif; ?>
+        </div>
+
+    </div>
+</div>
+
+<script>
+var activeEye = null;
+
+function toggleZoom(id, src, caption) {
+    var eyeBtn  = document.getElementById('eye-' + id);
+    var eyeIcon = document.getElementById('eye-icon-' + id);
+    var lb      = document.getElementById('lightbox');
+
+    // If same eye clicked again — close
+    if (activeEye === id) {
+        closeLightbox();
+        return;
+    }
+
+    // Reset previous eye if any
+    if (activeEye !== null) {
+        var prevIcon = document.getElementById('eye-icon-' + activeEye);
+        var prevBtn  = document.getElementById('eye-' + activeEye);
+        if (prevIcon) { prevIcon.className = 'fas fa-eye'; prevIcon.style.color = 'var(--gold)'; }
+        if (prevBtn)  prevBtn.classList.remove('eye-on');
+    }
+
+    // Open lightbox
+    activeEye = id;
+    document.getElementById('lightboxImg').src     = src;
+    document.getElementById('lightboxCaption').textContent = caption;
+    lb.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Switch to eye-slash (on state)
+    eyeIcon.className = 'fas fa-eye-slash'; eyeIcon.style.color = 'var(--navy)';
+    eyeBtn.classList.add('eye-on');
+}
+
+function closeLightbox() {
+    var lb = document.getElementById('lightbox');
+    lb.style.display = 'none';
+    document.body.style.overflow = '';
+
+    if (activeEye !== null) {
+        var prevIcon = document.getElementById('eye-icon-' + activeEye);
+        var prevBtn  = document.getElementById('eye-' + activeEye);
+        if (prevIcon) { prevIcon.className = 'fas fa-eye'; prevIcon.style.color = 'var(--gold)'; }
+        if (prevBtn)  prevBtn.classList.remove('eye-on');
+    }
+    activeEye = null;
+}
+
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeLightbox();
+});
+</script>
+
+<?php include 'includes/footer.php'; ?>

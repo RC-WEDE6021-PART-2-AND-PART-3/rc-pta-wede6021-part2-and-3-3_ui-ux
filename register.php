@@ -1,327 +1,251 @@
 <?php
-/**
- * ============================================================
- * PASTIMES — Online Second-Hand Clothing Store
- * File: register.php
- * Description: User registration page with HTML5 validation
- * ============================================================
- */
-
-session_start();
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 require_once 'includes/DBConn.php';
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-$error = '';
+// Already logged in — redirect to their dashboard
+if (isset($_SESSION['userID'])) {
+    $role = $_SESSION['role'];
+    if ($role === 'admin')  header('Location: admin/index.php');
+    elseif ($role === 'seller') header('Location: dashboards/seller.php');
+    else header('Location: dashboards/buyer.php');
+    exit;
+}
+
+$error   = '';
 $success = '';
 
-// Process registration form
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $fullName = trim($_POST['fullName'] ?? '');
     $username = trim($_POST['username'] ?? '');
-    $email = trim($_POST['email'] ?? '');
-    $password = $_POST['password'] ?? '';
-    $confirmPassword = $_POST['confirmPassword'] ?? '';
-    $agreeTerms = isset($_POST['agreeTerms']);
-    
-    // Validation array for sticky form
-    $errors = [];
-    
-    // Validate full name
-    if (empty($fullName)) {
-        $errors[] = 'Full name is required.';
-    } elseif (!preg_match('/^[a-zA-Z\s]+$/', $fullName)) {
-        $errors[] = 'Full name must contain only letters and spaces.';
-    } elseif (strlen($fullName) > 100) {
-        $errors[] = 'Full name must not exceed 100 characters.';
-    }
-    
-    // Validate username
-    if (empty($username)) {
-        $errors[] = 'Username is required.';
-    } elseif (!preg_match('/^[a-zA-Z0-9]+$/', $username)) {
-        $errors[] = 'Username must be alphanumeric only.';
-    } elseif (strlen($username) < 3) {
-        $errors[] = 'Username must be at least 3 characters.';
-    } elseif (strlen($username) > 50) {
-        $errors[] = 'Username must not exceed 50 characters.';
-    }
-    
-    // Validate email
-    if (empty($email)) {
-        $errors[] = 'Email address is required.';
+    $email    = trim($_POST['email']    ?? '');
+    $password = $_POST['password']      ?? '';
+    $confirm  = $_POST['confirmPassword'] ?? '';
+    $role     = $_POST['role']          ?? 'buyer';
+
+    // Validate
+    if (!$fullName || !$username || !$email || !$password || !$confirm) {
+        $error = 'All fields are required.';
     } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $errors[] = 'Please enter a valid email address.';
-    }
-    
-    // Validate password (minimum 8 characters)
-    if (empty($password)) {
-        $errors[] = 'Password is required.';
+        $error = 'Please enter a valid email address.';
     } elseif (strlen($password) < 8) {
-        $errors[] = 'Password must be at least 8 characters.';
+        $error = 'Password must be at least 8 characters.';
     } elseif (!preg_match('/[A-Z]/', $password)) {
-        $errors[] = 'Password must contain at least one uppercase letter.';
-    } elseif (!preg_match('/[a-z]/', $password)) {
-        $errors[] = 'Password must contain at least one lowercase letter.';
+        $error = 'Password must contain at least one uppercase letter.';
     } elseif (!preg_match('/[0-9]/', $password)) {
-        $errors[] = 'Password must contain at least one number.';
-    }
-    
-    // Validate password confirmation
-    if ($password !== $confirmPassword) {
-        $errors[] = 'Passwords do not match.';
-    }
-    
-    // Validate terms agreement
-    if (!$agreeTerms) {
-        $errors[] = 'You must agree to the Terms of Service and Privacy Policy.';
-    }
-    
-    // If no validation errors, proceed with database insert
-    if (empty($errors)) {
+        $error = 'Password must contain at least one number.';
+    } elseif ($password !== $confirm) {
+        $error = 'Passwords do not match.';
+    } elseif (!in_array($role, ['buyer', 'seller', 'admin'])) {
+        $error = 'Invalid role selected.';
+    } else {
         try {
             $conn = getConnection();
-            
-            // Check if username already exists
-            $stmt = $conn->prepare("SELECT userID FROM tblUser WHERE username = ?");
-            $stmt->bind_param('s', $username);
+
+            // Check duplicate username or email
+            $stmt = $conn->prepare("SELECT userID FROM tblUser WHERE username = ? OR email = ?");
+            $stmt->bind_param('ss', $username, $email);
             $stmt->execute();
-            if ($stmt->get_result()->num_rows > 0) {
-                $errors[] = 'Username already exists. Please choose a different one.';
-            }
-            $stmt->close();
-            
-            // Check if email already exists
-            $stmt = $conn->prepare("SELECT userID FROM tblUser WHERE email = ?");
-            $stmt->bind_param('s', $email);
-            $stmt->execute();
-            if ($stmt->get_result()->num_rows > 0) {
-                $errors[] = 'Email already registered. Please use a different email or login.';
-            }
-            $stmt->close();
-            
-            // If still no errors, insert the user
-            if (empty($errors)) {
-                $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-                $role = 'buyer'; // Default role
-                $sellerStatus = 'pending'; // Default status
-                
-                $stmt = $conn->prepare("INSERT INTO tblUser (fullName, email, username, password, role, seller_status) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param('ssssss', $fullName, $email, $username, $hashedPassword, $role, $sellerStatus);
-                
-                if ($stmt->execute()) {
-                    // Registration successful - redirect to login
-                    header('Location: login.php?registered=1');
-                    exit();
+            $stmt->store_result();
+
+            if ($stmt->num_rows > 0) {
+                $error = 'Username or email already exists.';
+            } else {
+                $hashed        = password_hash($password, PASSWORD_BCRYPT);
+                $seller_status = ($role === 'seller') ? 'pending' : 'none';
+                // Admin registrations are pending verification too
+                if ($role === 'admin') $seller_status = 'verified';
+
+                $ins = $conn->prepare(
+                    "INSERT INTO tblUser (fullName, username, email, password, role, seller_status)
+                     VALUES (?, ?, ?, ?, ?, ?)"
+                );
+                $ins->bind_param('ssssss', $fullName, $username, $email, $hashed, $role, $seller_status);
+                $ins->execute();
+                $newID = $conn->insert_id;
+
+                // Auto-login after registration
+                $_SESSION['userID']   = $newID;
+                $_SESSION['username'] = $username;
+                $_SESSION['fullName'] = $fullName;
+                $_SESSION['role']     = $role;
+                $_SESSION['seller_status'] = $seller_status;
+
+                $conn->close();
+
+                // Redirect to correct dashboard
+                if ($role === 'admin') {
+                    header('Location: admin/index.php');
+                } elseif ($role === 'seller') {
+                    header('Location: dashboards/seller.php');
                 } else {
-                    $errors[] = 'Registration failed. Please try again.';
+                    header('Location: dashboards/buyer.php');
                 }
-                $stmt->close();
+                exit;
             }
-            
             $conn->close();
         } catch (Exception $e) {
-            $errors[] = 'An error occurred. Please try again later.';
+            $error = 'Registration failed. Please try again.';
         }
-    }
-    
-    // Set error message
-    if (!empty($errors)) {
-        $error = implode('<br>', $errors);
     }
 }
 
-// Sticky form values
-$stickyFullName = isset($_POST['fullName']) ? htmlspecialchars($_POST['fullName']) : '';
-$stickyUsername = isset($_POST['username']) ? htmlspecialchars($_POST['username']) : '';
-$stickyEmail = isset($_POST['email']) ? htmlspecialchars($_POST['email']) : '';
+include 'includes/header.php';
 ?>
-<?php include 'includes/header.php'; ?>
 
-        <!-- Registration Section -->
-        <section class="section">
-            <div class="container-sm">
-                <!-- Logo Circle -->
-                <div class="text-center mb-lg">
-                    <div class="gold-divider">
-                        <div class="form-card-logo">P</div>
-                    </div>
-                    <h1 class="section-title">Join Pastimes</h1>
-                    <p class="section-subtitle" style="margin-bottom: 0;">Create your account to start buying and selling</p>
-                </div>
+<section style="padding: var(--space-3xl) var(--space-xl); min-height: 80vh; display:flex; align-items:center; justify-content:center;">
+    <div style="width:100%; max-width:560px;">
 
-                <div class="form-card" style="max-width: 620px;">
-                    <div class="form-card-header">
-                        <h2 style="font-family: var(--font-display); font-size: 1.4rem; color: var(--gold);">Registration Form</h2>
-                        <p class="text-muted" style="font-size: 0.85rem;">Fill in your details to create an account</p>
-                    </div>
-
-                    <?php if ($error): ?>
-                        <div class="alert alert-danger">
-                            <i class="fas fa-exclamation-circle"></i>
-                            <?php echo $error; ?>
-                        </div>
-                    <?php endif; ?>
-
-                    <form method="POST" action="register.php" id="registerForm">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Full Name <span class="required">*</span></label>
-                                <div class="form-control-wrapper">
-                                    <i class="fas fa-user form-icon"></i>
-                                    <input type="text" 
-                                           name="fullName" 
-                                           class="form-control" 
-                                           placeholder="Enter your full name"
-                                           value="<?php echo $stickyFullName; ?>"
-                                           pattern="[a-zA-Z\s]+"
-                                           maxlength="100"
-                                           required>
-                                </div>
-                                <span class="form-hint">As it appears on your ID</span>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Username <span class="required">*</span></label>
-                                <div class="form-control-wrapper">
-                                    <i class="fas fa-at form-icon"></i>
-                                    <input type="text" 
-                                           name="username" 
-                                           class="form-control" 
-                                           placeholder="Choose a username"
-                                           value="<?php echo $stickyUsername; ?>"
-                                           pattern="[a-zA-Z0-9]+"
-                                           minlength="3"
-                                           maxlength="50"
-                                           required>
-                                </div>
-                                <span class="form-hint">Min 3 characters, alphanumeric only</span>
-                            </div>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label">Email Address <span class="required">*</span></label>
-                            <div class="form-control-wrapper">
-                                <i class="fas fa-envelope form-icon"></i>
-                                <input type="email" 
-                                       name="email" 
-                                       class="form-control" 
-                                       placeholder="Enter your email address"
-                                       value="<?php echo $stickyEmail; ?>"
-                                       required>
-                            </div>
-                            <span class="form-hint">We'll send verification and notifications here</span>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label">Password <span class="required">*</span></label>
-                                <div class="form-control-wrapper">
-                                    <i class="fas fa-lock form-icon"></i>
-                                    <input type="password" 
-                                           name="password" 
-                                           id="password"
-                                           class="form-control has-icon-right" 
-                                           placeholder="Create a password"
-                                           minlength="8"
-                                           required>
-                                    <i class="fas fa-eye form-icon-right" onclick="togglePassword('password', this)"></i>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">Confirm Password <span class="required">*</span></label>
-                                <div class="form-control-wrapper">
-                                    <i class="fas fa-lock form-icon"></i>
-                                    <input type="password" 
-                                           name="confirmPassword" 
-                                           id="confirmPassword"
-                                           class="form-control has-icon-right" 
-                                           placeholder="Confirm your password"
-                                           minlength="8"
-                                           required>
-                                    <i class="fas fa-eye form-icon-right" onclick="togglePassword('confirmPassword', this)"></i>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Password Requirements -->
-                        <div class="password-requirements">
-                            <p><i class="fas fa-info-circle"></i> Password Requirements</p>
-                            <ul class="req-list">
-                                <li class="req-item" id="req-length">
-                                    <i class="fas fa-check req-icon"></i> Minimum 8 characters
-                                </li>
-                                <li class="req-item" id="req-number">
-                                    <i class="fas fa-check req-icon"></i> At least one number
-                                </li>
-                                <li class="req-item" id="req-upper">
-                                    <i class="fas fa-check req-icon"></i> Upper & lowercase letters
-                                </li>
-                                <li class="req-item" id="req-match">
-                                    <i class="fas fa-check req-icon"></i> Passwords must match
-                                </li>
-                            </ul>
-                        </div>
-
-                        <!-- Account Information Notice -->
-                        <div class="alert alert-info mt-lg">
-                            <strong>Account Information</strong><br>
-                            All new accounts start as <strong>Buyers</strong>. To become a verified seller, you'll need to request seller status after registration. Our admin team will verify your account before you can list items for sale.
-                        </div>
-
-                        <div class="form-check mt-lg">
-                            <input type="checkbox" id="agreeTerms" name="agreeTerms" required>
-                            <label for="agreeTerms">I agree to the <a href="#">Terms of Service</a> and <a href="#">Privacy Policy</a> <span class="required">*</span></label>
-                        </div>
-
-                        <div class="form-check">
-                            <input type="checkbox" id="newsletter" name="newsletter">
-                            <label for="newsletter">Subscribe to our newsletter for updates on new listings and promotions</label>
-                        </div>
-
-                        <button type="submit" class="btn btn-primary btn-full btn-lg mt-lg">Create Account</button>
-                    </form>
-
-                    <div class="form-divider">Already have an account?</div>
-
-                    <a href="login.php" class="btn btn-outline btn-full">Sign In Instead</a>
-                </div>
+        <!-- Card -->
+        <div class="form-card">
+            <div class="form-card-header text-center">
+                <div class="form-card-logo">P</div>
+                <h1 style="font-family:var(--font-display); font-size:1.8rem; color:var(--gold); margin-bottom:var(--space-xs);">
+                    Join Pastimes
+                </h1>
+                <p style="color:var(--text-muted); font-size:0.9rem;">
+                    Create your free account and choose your role
+                </p>
             </div>
-        </section>
 
-        <script>
-            function togglePassword(inputId, icon) {
-                const input = document.getElementById(inputId);
-                if (input.type === 'password') {
-                    input.type = 'text';
-                    icon.classList.remove('fa-eye');
-                    icon.classList.add('fa-eye-slash');
-                } else {
-                    input.type = 'password';
-                    icon.classList.remove('fa-eye-slash');
-                    icon.classList.add('fa-eye');
-                }
-            }
+            <?php if ($error): ?>
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?>
+            </div>
+            <?php endif; ?>
 
-            // Real-time password validation
-            document.getElementById('password').addEventListener('input', validatePassword);
-            document.getElementById('confirmPassword').addEventListener('input', validatePassword);
+            <form method="POST" action="register.php" id="registerForm">
 
-            function validatePassword() {
-                const password = document.getElementById('password').value;
-                const confirmPassword = document.getElementById('confirmPassword').value;
+                <!-- Full Name -->
+                <div class="form-group">
+                    <label class="form-label" for="fullName">Full Name <span class="required">*</span></label>
+                    <input
+                        type="text" id="fullName" name="fullName"
+                        class="form-control"
+                        placeholder="e.g. John Doe"
+                        value="<?php echo htmlspecialchars($_POST['fullName'] ?? ''); ?>"
+                        required
+                    >
+                </div>
 
-                // Check length
-                document.getElementById('req-length').classList.toggle('met', password.length >= 8);
-                
-                // Check for number
-                document.getElementById('req-number').classList.toggle('met', /\d/.test(password));
-                
-                // Check for upper and lowercase
-                document.getElementById('req-upper').classList.toggle('met', /[A-Z]/.test(password) && /[a-z]/.test(password));
-                
-                // Check match
-                document.getElementById('req-match').classList.toggle('met', password === confirmPassword && password.length > 0);
-            }
-        </script>
+                <!-- Username -->
+                <div class="form-group">
+                    <label class="form-label" for="username">Username <span class="required">*</span></label>
+                    <input
+                        type="text" id="username" name="username"
+                        class="form-control"
+                        placeholder="e.g. johndoe"
+                        value="<?php echo htmlspecialchars($_POST['username'] ?? ''); ?>"
+                        required
+                    >
+                </div>
+
+                <!-- Email -->
+                <div class="form-group">
+                    <label class="form-label" for="email">Email Address <span class="required">*</span></label>
+                    <input
+                        type="email" id="email" name="email"
+                        class="form-control"
+                        placeholder="e.g. john@email.co.za"
+                        value="<?php echo htmlspecialchars($_POST['email'] ?? ''); ?>"
+                        required
+                    >
+                </div>
+
+                <!-- Password -->
+                <div class="form-group">
+                    <label class="form-label" for="password">Password <span class="required">*</span></label>
+                    <div class="password-wrapper">
+                        <input
+                            type="password" id="password" name="password"
+                            class="form-control"
+                            placeholder="Min. 8 characters"
+                            required
+                        >
+                        <button type="button" class="toggle-password" data-target="#password">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="password-requirements mt-sm">
+                        <div class="requirement" id="req-length">At least 8 characters</div>
+                        <div class="requirement" id="req-upper">At least one uppercase letter</div>
+                        <div class="requirement" id="req-number">At least one number</div>
+                    </div>
+                </div>
+
+                <!-- Confirm Password -->
+                <div class="form-group">
+                    <label class="form-label" for="confirmPassword">Confirm Password <span class="required">*</span></label>
+                    <div class="password-wrapper">
+                        <input
+                            type="password" id="confirmPassword" name="confirmPassword"
+                            class="form-control"
+                            placeholder="Repeat your password"
+                            required
+                        >
+                        <button type="button" class="toggle-password" data-target="#confirmPassword">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-hint" id="confirmHint"></div>
+                </div>
+
+                <!-- Role Selection -->
+                <div class="form-group">
+                    <label class="form-label">Select Your Role <span class="required">*</span></label>
+                    <div class="role-selector">
+
+                        <div class="role-option">
+                            <input type="radio" name="role" id="role-buyer" value="buyer"
+                                <?php echo (($_POST['role'] ?? 'buyer') === 'buyer') ? 'checked' : ''; ?>>
+                            <label class="role-card" for="role-buyer">
+                                <span class="role-icon"><i class="fas fa-shopping-bag" style="color:var(--gold);"></i></span>
+                                <span class="role-title">Buyer</span>
+                                <span class="role-desc">Browse and purchase clothing</span>
+                            </label>
+                        </div>
+
+                        <div class="role-option">
+                            <input type="radio" name="role" id="role-seller" value="seller"
+                                <?php echo (($_POST['role'] ?? '') === 'seller') ? 'checked' : ''; ?>>
+                            <label class="role-card" for="role-seller">
+                                <span class="role-icon"><i class="fas fa-store" style="color:var(--gold);"></i></span>
+                                <span class="role-title">Seller</span>
+                                <span class="role-desc">List and sell your clothing</span>
+                            </label>
+                        </div>
+
+                        <div class="role-option">
+                            <input type="radio" name="role" id="role-admin" value="admin"
+                                <?php echo (($_POST['role'] ?? '') === 'admin') ? 'checked' : ''; ?>>
+                            <label class="role-card" for="role-admin">
+                                <span class="role-icon"><i class="fas fa-shield-alt" style="color:var(--gold);"></i></span>
+                                <span class="role-title">Admin</span>
+                                <span class="role-desc">Manage the platform</span>
+                            </label>
+                        </div>
+
+                    </div>
+                    <p class="form-hint mt-sm">
+                        <i class="fas fa-info-circle"></i>
+                        Seller accounts require admin verification before listing items.
+                    </p>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-full btn-lg" style="margin-top:var(--space-md);">
+                    <i class="fas fa-user-plus"></i> Create Account
+                </button>
+
+            </form>
+
+            <p class="text-center mt-lg" style="font-size:0.88rem; color:var(--text-muted);">
+                Already have an account?
+                <a href="login.php" style="color:var(--gold); font-weight:600;">Login here</a>
+            </p>
+        </div>
+
+    </div>
+</section>
 
 <?php include 'includes/footer.php'; ?>

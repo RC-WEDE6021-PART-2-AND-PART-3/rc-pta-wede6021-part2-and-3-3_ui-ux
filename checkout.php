@@ -1,243 +1,159 @@
 <?php
-/**
- * ============================================================
- * PASTIMES — Online Second-Hand Clothing Store
- * File: checkout.php
- * Description: Checkout page for completing purchases
- * ============================================================
- */
-
-session_start();
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
 require_once 'includes/DBConn.php';
+if (session_status() === PHP_SESSION_NONE) session_start();
 
-// Redirect if not logged in
-if (!isset($_SESSION['userID'])) {
-    header('Location: login.php');
-    exit();
+if (!isset($_SESSION['userID']) || $_SESSION['role'] !== 'buyer') {
+    header('Location: /Pastimes/login.php'); exit;
 }
 
-// Redirect if cart is empty
-if (!isset($_SESSION['cart']) || empty($_SESSION['cart'])) {
-    header('Location: cart.php');
-    exit();
+$cart = $_SESSION['cart'] ?? [];
+if (empty($cart)) {
+    header('Location: /Pastimes/cart.php'); exit;
 }
 
-$error = '';
-$success = '';
-$cartItems = [];
-$addresses = [];
-$subtotal = 0;
-$deliveryFee = 150;
+$userID = $_SESSION['userID'];
+$total  = array_sum(array_column($cart, 'price'));
+$success = $error = '';
 
-// Fetch cart items and user addresses
-try {
-    $conn = getConnection();
-    
-    // Get cart items
-    $placeholders = implode(',', array_fill(0, count($_SESSION['cart']), '?'));
-    $types = str_repeat('s', count($_SESSION['cart']));
-    
-    $stmt = $conn->prepare("SELECT * FROM tblClothing WHERE clothingID IN ($placeholders) AND status = 'available'");
-    $stmt->bind_param($types, ...$_SESSION['cart']);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    
-    while ($row = $result->fetch_assoc()) {
-        $cartItems[] = $row;
-        $subtotal += $row['price'];
-    }
-    
-    // Get user addresses
-    $stmt = $conn->prepare("SELECT * FROM tblDeliveryAddress WHERE userID = ?");
-    $userID = $_SESSION['userID'];
-    $stmt->bind_param('s', $userID);
-    $stmt->execute();
-    $addresses = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
-    
-} catch (Exception $e) {
-    $error = 'Could not load checkout data.';
-}
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $street   = trim($_POST['street']   ?? '');
+    $suburb   = trim($_POST['suburb']   ?? '');
+    $city     = trim($_POST['city']     ?? '');
+    $province = trim($_POST['province'] ?? '');
+    $postal   = trim($_POST['postal']   ?? '');
 
-$total = $subtotal + $deliveryFee;
-
-// Process checkout
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'place_order') {
-    $addressID = isset($_POST['addressID']) ? intval($_POST['addressID']) : 0;
-    
-    if ($addressID === 0) {
-        $error = 'Please select a delivery address.';
-    } elseif (empty($cartItems)) {
-        $error = 'Your cart is empty or items are no longer available.';
+    if (!$street || !$city) {
+        $error = 'Street address and city are required.';
     } else {
         try {
             $conn = getConnection();
-            $conn->begin_transaction();
-            
+
+            // Save address
+            $as = $conn->prepare("INSERT INTO tblDeliveryAddress (userID,streetAddress,suburb,city,province,postalCode,isDefault) VALUES (?,?,?,?,?,?,0)");
+            $as->bind_param('isssss', $userID, $street, $suburb, $city, $province, $postal);
+            $as->execute();
+            $addressID = $conn->insert_id;
+
             // Create order
-            $stmt = $conn->prepare("INSERT INTO tblOrder (buyerID, addressID, totalAmount, orderStatus) VALUES (?, ?, ?, 'placed')");
-            $totalStr = strval($total);
-            $stmt->bind_param('sss', $userID, $addressID, $totalStr);
-            $stmt->execute();
+            $os = $conn->prepare("INSERT INTO tblOrder (buyerID,addressID,totalAmount,orderStatus) VALUES (?,?,?,'placed')");
+            $os->bind_param('iid', $userID, $addressID, $total);
+            $os->execute();
             $orderID = $conn->insert_id;
-            
-            // Create order items and mark clothing as sold
-            $stmtItem = $conn->prepare("INSERT INTO tblOrderItem (orderID, clothingID, priceAtPurchase) VALUES (?, ?, ?)");
-            $stmtUpdate = $conn->prepare("UPDATE tblClothing SET status = 'sold' WHERE clothingID = ?");
-            
-            foreach ($cartItems as $item) {
-                $orderIDStr = strval($orderID);
-                $clothingIDStr = strval($item['clothingID']);
-                $priceStr = strval($item['price']);
-                
-                $stmtItem->bind_param('sss', $orderIDStr, $clothingIDStr, $priceStr);
-                $stmtItem->execute();
-                
-                $stmtUpdate->bind_param('s', $clothingIDStr);
-                $stmtUpdate->execute();
+
+            // Order items + mark as sold
+            foreach ($cart as $ci) {
+                $oi = $conn->prepare("INSERT INTO tblOrderItem (orderID,clothingID,priceAtPurchase) VALUES (?,?,?)");
+                $oi->bind_param('iid', $orderID, $ci['clothingID'], $ci['price']);
+                $oi->execute();
+                $conn->query("UPDATE tblClothing SET status='sold' WHERE clothingID={$ci['clothingID']}");
             }
-            
-            $conn->commit();
-            
+
             // Clear cart
             $_SESSION['cart'] = [];
-            
-            // Redirect to success page
-            header('Location: profile.php?tab=orders&success=1');
-            exit();
-            
+            $conn->close();
+
+            $success = "Order #$orderID placed successfully! Thank you for shopping with Pastimes.";
         } catch (Exception $e) {
-            $conn->rollback();
-            $error = 'Could not process order. Please try again.';
+            $error = 'Checkout failed. Please try again.';
         }
     }
 }
+
+include 'includes/header.php';
 ?>
-<?php include 'includes/header.php'; ?>
 
-        <!-- Page Header -->
-        <div class="page-header">
-            <h1>Checkout</h1>
-            <p>Complete your purchase</p>
+<div class="page-header">
+    <h1>Check<span style="color:var(--gold);">out</span></h1>
+    <p>Complete your order</p>
+</div>
+
+<div class="container section">
+
+    <?php if ($success): ?>
+    <div style="text-align:center; padding:var(--space-3xl);">
+        <div style="font-size:4rem; color:var(--gold); margin-bottom:1rem;">✅</div>
+        <h2 style="font-family:var(--font-display); color:var(--gold); font-size:2rem; margin-bottom:var(--space-md);">Order Placed!</h2>
+        <p style="color:var(--text-secondary); font-size:1rem; margin-bottom:var(--space-xl);"><?php echo htmlspecialchars($success); ?></p>
+        <div style="display:flex; gap:1rem; justify-content:center; flex-wrap:wrap;">
+            <a href="/Pastimes/dashboards/buyer.php?page=orders" class="btn btn-primary btn-lg">View My Orders</a>
+            <a href="/Pastimes/browse.php" class="btn btn-outline btn-lg">Continue Shopping</a>
         </div>
+    </div>
 
-        <!-- Checkout Section -->
-        <section class="section">
-            <div class="container">
-                <?php if ($error): ?>
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-circle"></i>
-                        <?php echo htmlspecialchars($error); ?>
-                    </div>
-                <?php endif; ?>
+    <?php else: ?>
 
+    <?php if ($error): ?>
+    <div class="alert alert-danger mb-lg"><i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?></div>
+    <?php endif; ?>
+
+    <div class="cart-layout">
+
+        <!-- Delivery Form -->
+        <div>
+            <h2 style="color:var(--text-primary); font-size:1.2rem; margin-bottom:var(--space-lg);">Delivery Address</h2>
+            <div class="form-card">
                 <form method="POST">
-                    <input type="hidden" name="action" value="place_order">
-                    
-                    <div class="grid-2" style="grid-template-columns: 2fr 1fr; gap: var(--space-xl); align-items: start;">
-                        <!-- Checkout Form -->
-                        <div>
-                            <!-- Delivery Address -->
-                            <div class="settings-section">
-                                <h2>Delivery Address</h2>
-                                <p>Select where you'd like your items delivered</p>
-
-                                <?php if (!empty($addresses)): ?>
-                                    <div class="grid-2" style="gap: var(--space-md);">
-                                        <?php foreach ($addresses as $addr): ?>
-                                            <label class="card" style="cursor: pointer; padding: var(--space-lg);">
-                                                <div class="flex gap-md" style="align-items: flex-start;">
-                                                    <input type="radio" name="addressID" value="<?php echo $addr['addressID']; ?>" <?php echo $addr['isDefault'] ? 'checked' : ''; ?> style="margin-top: 4px;">
-                                                    <div>
-                                                        <span class="badge badge-gold mb-sm"><?php echo ucfirst($addr['addressType']); ?></span>
-                                                        <p style="color: var(--text-primary); margin-bottom: var(--space-xs);">
-                                                            <?php echo htmlspecialchars($addr['streetAddress']); ?>
-                                                        </p>
-                                                        <p class="text-muted" style="font-size: 0.85rem;">
-                                                            <?php echo htmlspecialchars($addr['suburb']); ?>, <?php echo htmlspecialchars($addr['city']); ?>, <?php echo htmlspecialchars($addr['postalCode']); ?>
-                                                        </p>
-                                                        <?php if ($addr['isDefault']): ?>
-                                                            <span class="badge badge-success mt-sm">Default</span>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                </div>
-                                            </label>
-                                        <?php endforeach; ?>
-                                    </div>
-                                    
-                                    <a href="profile.php?tab=addresses" class="btn btn-outline mt-lg">
-                                        <i class="fas fa-plus"></i> Add New Address
-                                    </a>
-                                <?php else: ?>
-                                    <div class="alert alert-warning">
-                                        <i class="fas fa-info-circle"></i>
-                                        You don't have any delivery addresses saved. Please add one to continue.
-                                    </div>
-                                    <a href="profile.php?tab=addresses" class="btn btn-primary">
-                                        <i class="fas fa-plus"></i> Add Delivery Address
-                                    </a>
-                                <?php endif; ?>
-                            </div>
-
-                            <!-- Order Items -->
-                            <div class="settings-section">
-                                <h2>Order Items</h2>
-                                <p><?php echo count($cartItems); ?> items in your order</p>
-
-                                <?php foreach ($cartItems as $item): ?>
-                                    <div class="cart-item">
-                                        <div class="cart-item-img">
-                                            <span style="color: var(--gold);"><?php echo strtoupper(substr($item['brand'], 0, 1)); ?></span>
-                                        </div>
-                                        <div class="cart-item-info">
-                                            <div class="cart-item-brand"><?php echo htmlspecialchars($item['brand']); ?></div>
-                                            <h3 class="cart-item-name"><?php echo htmlspecialchars(substr($item['description'], 0, 40)); ?>...</h3>
-                                            <p class="cart-item-meta">Size: <?php echo htmlspecialchars($item['size']); ?></p>
-                                        </div>
-                                        <div class="cart-item-price">R<?php echo number_format($item['price'], 2); ?></div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
+                    <div class="form-group">
+                        <label class="form-label">Street Address <span class="required">*</span></label>
+                        <input type="text" name="street" class="form-control" placeholder="e.g. 123 Main Street" required>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label class="form-label">Suburb</label>
+                            <input type="text" name="suburb" class="form-control" placeholder="e.g. Sandton">
                         </div>
-
-                        <!-- Order Summary -->
-                        <div class="order-summary">
-                            <h3>Order Summary</h3>
-
-                            <div class="order-line">
-                                <span>Subtotal (<?php echo count($cartItems); ?> items)</span>
-                                <span>R<?php echo number_format($subtotal, 2); ?></span>
-                            </div>
-
-                            <div class="order-line">
-                                <span>Delivery Fee</span>
-                                <span>R<?php echo number_format($deliveryFee, 2); ?></span>
-                            </div>
-
-                            <div class="order-line total">
-                                <span>Total</span>
-                                <span class="price">R<?php echo number_format($total, 2); ?></span>
-                            </div>
-
-                            <button type="submit" class="btn btn-primary btn-full btn-lg mt-lg" <?php echo empty($addresses) ? 'disabled' : ''; ?>>
-                                Place Order <i class="fas fa-check"></i>
-                            </button>
-
-                            <a href="cart.php" class="btn btn-ghost btn-full mt-md">
-                                <i class="fas fa-arrow-left"></i> Back to Cart
-                            </a>
-
-                            <div class="mt-lg text-center">
-                                <p class="text-muted" style="font-size: 0.8rem;">
-                                    <i class="fas fa-lock"></i> Your payment information is secure
-                                </p>
-                            </div>
+                        <div class="form-group">
+                            <label class="form-label">City <span class="required">*</span></label>
+                            <input type="text" name="city" class="form-control" placeholder="e.g. Johannesburg" required>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Province</label>
+                            <select name="province" class="form-control">
+                                <option value="">Select province</option>
+                                <?php foreach (['Gauteng','Western Cape','KwaZulu-Natal','Eastern Cape','Limpopo','Mpumalanga','North West','Free State','Northern Cape'] as $p): ?>
+                                <option><?php echo $p; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Postal Code</label>
+                            <input type="text" name="postal" class="form-control" placeholder="e.g. 2196">
                         </div>
                     </div>
+                    <button type="submit" class="btn btn-primary btn-full btn-lg">
+                        <i class="fas fa-check"></i> Place Order
+                    </button>
                 </form>
             </div>
-        </section>
+        </div>
 
-<?php 
-if (isset($conn)) $conn->close();
-include 'includes/footer.php'; 
-?>
+        <!-- Order Summary -->
+        <div class="cart-summary">
+            <h3>Order Summary</h3>
+            <?php foreach ($cart as $ci): ?>
+            <div class="summary-row">
+                <span style="font-size:0.85rem;"><?php echo htmlspecialchars($ci['brand']); ?></span>
+                <span>R <?php echo number_format($ci['price'],2); ?></span>
+            </div>
+            <?php endforeach; ?>
+            <div class="summary-row">
+                <span>Delivery</span>
+                <span style="color:#4ade80;">Free</span>
+            </div>
+            <div class="summary-row" style="border-top:1px solid var(--border-gold); padding-top:var(--space-sm); margin-top:var(--space-sm);">
+                <span class="summary-total">Total</span>
+                <span class="summary-total">R <?php echo number_format($total,2); ?></span>
+            </div>
+            <a href="/Pastimes/cart.php" class="btn btn-ghost btn-full" style="margin-top:var(--space-md);">
+                <i class="fas fa-arrow-left"></i> Back to Cart
+            </a>
+        </div>
+
+    </div>
+    <?php endif; ?>
+
+</div>
+
+<?php include 'includes/footer.php'; ?>
