@@ -1,0 +1,5 @@
+1,1,2,Hi! Is the Gucci Blazer still available?,2026-01-15 10:30:00,0
+2,2,1,Yes it is! Are you interested?,2026-01-15 11:00:00,1
+3,1,2,Can you tell me more about the condition? Any stains or repairs?,2026-01-15 11:30:00,0
+4,2,1,The blazer is in excellent condition. No stains repairs or damage. It has been dry cleaned and is ready to wear. I can send you more photos if you would like!,2026-01-15 12:00:00,1
+5,1,2,That would be great! Also is the price negotiable?,2026-01-15 12:30:00,0

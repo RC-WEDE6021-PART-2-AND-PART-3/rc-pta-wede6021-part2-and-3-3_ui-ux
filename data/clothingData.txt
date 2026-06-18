@@ -1,0 +1,5 @@
+1,Gucci,Vintage Gucci Blazer,Classic vintage Gucci blazer in excellent condition. Perfect for formal occasions.,Outerwear,M,Navy,Excellent,2500.00,Men,images/products/default.jpg,Available,Women
+2,Levi's,Classic Levi's Denim Jacket,Timeless denim jacket with authentic wear patterns. A wardrobe essential.,Outerwear,S,Blue,Good,850.00,Unisex,images/products/default.jpg,Available,Women
+3,Burberry,Burberry Trench Coat,Iconic Burberry trench coat in pristine condition. Features signature check lining.,Outerwear,L,Beige,Like New,4200.00,Women,images/products/default.jpg,Available,Men
+4,Ralph Lauren,Ralph Lauren Polo Shirt,Classic fit polo shirt in excellent condition. Perfect for casual wear.,Tops,S,White,Good,450.00,Men,images/products/default.jpg,Available,Men
+5,Prada,Prada Leather Handbag,Authentic Prada leather handbag with dust bag. Minor wear on handles.,Accessories,One Size,Black,Excellent,3800.00,Women,images/products/default.jpg,Available,Women

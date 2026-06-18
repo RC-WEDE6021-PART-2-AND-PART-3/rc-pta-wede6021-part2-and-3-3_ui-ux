@@ -1,0 +1,6 @@
+John Doe, j.doe@abc.co.za, johndoe, Password123, buyer, none
+Jane Smith, jane.smith@email.co.za, janesmith, SecurePass1, seller, verified
+Admin User, admin@pastimes.co.za, admin, AdminPass1, admin, verified
+Thabo Mokoena, thabo@email.co.za, thabom, ThaboPass1, seller, verified
+Lerato Nkosi, lerato@email.co.za, leraton, LeratoPass1, buyer, none
+Sipho Dlamini, sipho@email.co.za, siphod, SiphoPass1, buyer, none

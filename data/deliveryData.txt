@@ -1,0 +1,5 @@
+1,123 Main Street,Sandton,Johannesburg,Gauteng,2196,1
+2,45 Beach Road,Sea Point,Cape Town,Western Cape,8005,2
+3,78 Church Street,Hatfield,Pretoria,Gauteng,0028,3
+4,22 Florida Road,Morningside,Durban,KwaZulu-Natal,4001,4
+5,15 Long Street,CBD,Cape Town,Western Cape,8001,5
